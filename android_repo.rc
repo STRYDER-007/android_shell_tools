@@ -3,33 +3,189 @@
 #   Developed by Adrian DC - 2015-2016
 # ======================================
 
+# === Repo Root Directory ===
+function repor()
+{
+  local repodir=${PWD};
+  while [[ "${repodir}" != '/' && ! -d "${repodir}/.repo" ]]; do
+    repodir=$(readlink -f "${repodir}/..");
+  done;
+  if [ -d "${repodir}/.repo" ]; then
+    cd ${repodir};
+  fi;
+}
+
+# === Repo Environment Starter for CM ===
+function repos()
+{
+  local currentdir=${PWD}; repor;
+  if [ -f ./build/envsetup.sh ]; then
+    local device=$(getine "$1" "huashan");
+    source ./build/envsetup.sh; croot;
+    breakfast $device;
+  else
+    echo "Android Repo not found...";
+  fi;
+  cd "$currentdir";
+}
+
+# === Repo Environment Starter for AOSP ===
+function reposaosp()
+{
+  local currentdir=${PWD}; repor;
+  if [ -f ./build/envsetup.sh ]; then
+    local device=$(getine "$1" "huashan");
+    source ./build/envsetup.sh; croot;
+    lunch aosp_${device}-userdebug;
+  else
+    echo "Android Repo not found...";
+  fi;
+  cd "$currentdir";
+}
+
+# === Roomservice Manifest ===
+function reporoomserv()
+{
+  cwd=$(pwd);
+  repor;
+  mkdir -p .repo/local_manifests/;
+  gedit .repo/local_manifests/roomservice.xml .repo/manifest.xml;
+  cd "$cwd";
+}
+
+# === Repo Sync Project ===
+alias reposi='repo sync .';
+
+# === Repo Sync Efficiently ===
+alias reposy='repo sync -j$(grep -c ^processor /proc/cpuinfo) --current-branch --detach -f --force-broken --force-sync -c --no-clone-bundle --no-tags';
+
+# === Repo AOSP Syncer ===
+function reposyaosp()
+{
+  cwd=$(pwd);
+  repor;
+  cdaosp;
+  reposy;
+  cd "$cwd";
+  repor;
+  reposy;
+  cd "$cwd";
+}
+
+# === Repo CM Syncer ===
+function reposycm()
+{
+  cwd=$(pwd);
+  repor;
+  cdcm;
+  reposy;
+  cd "$cwd";
+  repor;
+  reposy;
+  cd "$cwd";
+}
+
+# === Repo Sync Clean ===
+function reposycl()
+{
+  repo forall -c 'echo "Cleaning project ${REPO_PROJECT}"; \
+                  git rebase --abort >/dev/null 2>&1; \
+                  git stash -u >/dev/null 2>&1; \
+                  git reset --hard HEAD >/dev/null 2>&1;';
+  repo sync -j$(grep -c ^processor /proc/cpuinfo) --current-branch --detach -f --force-broken --force-sync -c --no-clone-bundle --no-tags;
+}
+
+# === Repo Study Projects ===
+function reposup()
+{
+  echo '';
+  repo forall -c 'git fetch --quiet ${REPO_REMOTE} ${REPO_RREV##*/}; \
+                  changescount=$(git rev-list --left-only --count HEAD...FETCH_HEAD); \
+                  if [ ${changescount} -ne 0 ]; then \
+                    echo " Project ${REPO_PROJECT} : ${changescount} changes"; \
+                  fi; \
+                  if [ $(git diff --quiet; echo $?) -ne 0 ]; then \
+                    echo ''; \
+                    echo " Project ${REPO_PROJECT} : Differences"; \
+                    git diff; \
+                    echo ''; \
+                  fi;' 2> /dev/null;
+  echo '';
+}
+
+# === Repo CCache Status/Setter ===
+function repocache()
+{
+  local currentdir=$(pwd);
+  repor;
+  if [ ! -z "$1" ]; then ./prebuilts/misc/linux-x86/ccache/ccache -M $1; fi;
+  watch -n 1 -d "./prebuilts/misc/linux-x86/ccache/ccache" -s;
+  cd $currentdir;
+}
+
+# === Repo CCache Cleaner ===
+alias repocleancache='if [ ! -z "$CCACHE_DIR" ]; then rm -rfv "$CCACHE_DIR/"*; fi';
+
 # === Build paths ===
 export bash_android_flashable_zip=$bash_android_dir/android_files/flashable_template.zip;
+export bash_kernel_injector_template_zip=$bash_android_dir/android_files/kernel_injector_template.zip;
 export bash_kernel_template_zip=$bash_android_dir/android_files/kernel_template.zip;
-export bash_android_twrp_fota_zip=$bash_android_dir/android_files/twrp_fota_template.zip;
-export bash_android_twrp_multirom_zip=$bash_android_dir/android_files/twrp_multirom_template.zip;
+export bash_android_twrp_fota_old_zip=$bash_android_dir/android_files/twrp_fota_old_template.zip;
+export bash_android_twrp_fota_new_zip=$bash_android_dir/android_files/twrp_fota_new_template.zip;
+export bash_android_twrp_multirom_old_zip=$bash_android_dir/android_files/twrp_multirom_old_template.zip;
+export bash_android_twrp_multirom_new_zip=$bash_android_dir/android_files/twrp_multirom_new_template.zip;
 export bash_android_sign_apk_dir=$bash_android_dir/android_signapk;
 export bash_android_tools_mkuserimg=$bash_android_dir/android_tools/mkuserimg.sh;
 
 # === Repo TWRP ===
 repotwrp()
 {
-  export CurDir=${PWD};
+  # Usage
+  if [ -z "$1" ]; then
+    echo "";
+    echo " Usage: repotwrp {device} [nosync,nowipe,outcl,fota,local]";
+    echo "";
+    return;
+  fi;
 
-  # Phone huashan
+  export CurDir=${PWD};
+  repor;
+
+  # Phone and params
   PhoneName="$1";
+  BuildParams="$2";
   if [ -z "$PhoneName" ]; then
     PhoneName="huashan";
   fi;
 
-  BuildParams="$2";
-  if [ -z "$BuildParams" ]; then
+  # Sources Sync
+  if [[ ! "$BuildParams" =~ "nosync" ]]; then
     # Sources Sync
     repo sync --current-branch --detach --force-broken --force-sync --no-clone-bundle --no-tags;
 
-    # Clean
-    make clean;
+    # Java JDK 8
+    source ./build/envsetup.sh;
+    repopick 18851;
   fi;
+
+  # Clean
+  if [[ ! "$BuildParams" =~ "nowipe" ]]; then
+    make clean;
+
+  # Cleanout
+  elif [[ "$BuildParams" =~ "outcl" ]]; then
+    rm -rfv ./out/target/product/$PhoneName/recovery/*;
+    rm -rfv ./out/target/product/$PhoneName/root/*;
+  fi;
+
+  # Handle boot types
+  FlashableZipNewType='';
+  MultiROMBootableTWRP='true';
+  case "$PhoneName" in
+    dora)
+        FlashableZipNewType='true';
+        MultiROMBootableTWRP='';;
+  esac;
 
   # Make recovery
   source ./build/envsetup.sh;
@@ -49,7 +205,10 @@ repotwrp()
   OutFOTAZip="twrp-$TWRPVersion-$DateTag-fota-${PhoneName}.zip";
   OutMultiROMZip="twrp-$TWRPVersion-$DateTag-secondary-multirom-${PhoneName}.zip";
   OutTWRP="twrp.img";
-  TargetDir="$(xdg-user-dir DESKTOP)";
+  TargetDir="$(xdg-user-dir DESKTOP)/TWRP-Android";
+  if [ ! -d "$TargetDir" ]; then
+    mkdir -p "$TargetDir/";
+  fi;
 
   if [ -f "$TargetDir/$OutTWRP" ]; then rm -f "$TargetDir/$OutTWRP"; fi;
   if [ -f "$TargetDir/$OutBootImg" ]; then rm "$TargetDir/$OutBootImg"; fi;
@@ -65,8 +224,13 @@ repotwrp()
   fi;
   cp "$TWRPImg" "$TargetDir/$OutTWRP";
   cp "$TWRPImg" "$TargetDir/$OutBootImg";
-  cp "$bash_android_twrp_fota_zip" "$TargetDir/$OutFOTAZip.unsigned.zip";
-  cp "$bash_android_twrp_multirom_zip" "$TargetDir/$OutMultiROMZip.unsigned.zip";
+  if [ ! -z "$FlashableZipNewType" ]; then
+    cp "$bash_android_twrp_fota_new_zip" "$TargetDir/$OutFOTAZip.unsigned.zip";
+    cp "$bash_android_twrp_multirom_new_zip" "$TargetDir/$OutMultiROMZip.unsigned.zip";
+  else
+    cp "$bash_android_twrp_fota_old_zip" "$TargetDir/$OutFOTAZip.unsigned.zip";
+    cp "$bash_android_twrp_multirom_old_zip" "$TargetDir/$OutMultiROMZip.unsigned.zip";
+  fi;
   zip -j -g "$TargetDir/$OutFOTAZip.unsigned.zip" "$TargetDir/$OutTWRP";
   zip -j -g "$TargetDir/$OutMultiROMZip.unsigned.zip" "$TargetDir/$OutTWRP";
   cd ./out/target/product/$PhoneName/;
@@ -77,12 +241,12 @@ repotwrp()
        "$bash_android_sign_apk_dir/testkey.pk8" \
        "$TargetDir/$OutFOTAZip.unsigned.zip" \
        "$TargetDir/$OutFOTAZip";
+  rm -f "$TargetDir/$OutFOTAZip.unsigned.zip";
   java -jar "$bash_android_sign_apk_dir/signapk-cm121.jar" \
        -w "$bash_android_sign_apk_dir/testkey.x509.pem" \
        "$bash_android_sign_apk_dir/testkey.pk8" \
        "$TargetDir/$OutMultiROMZip.unsigned.zip" \
        "$TargetDir/$OutMultiROMZip";
-  rm -f "$TargetDir/$OutFOTAZip.unsigned.zip";
   rm -f "$TargetDir/$OutMultiROMZip.unsigned.zip";
   rm -f "$TargetDir/$OutTWRP";
 
@@ -96,16 +260,24 @@ repotwrp()
   echo "  [ Install TWRP on the '$PhoneName' ]";
   echo "";
   printf "  Flash Recovery to FOTA (y/N) ? ";
-  read -t 10 key;
+  if [[ "$BuildParams" =~ "fota" ]]; then
+    key='y';
+  else
+    read -t 10 key;
+  fi;
   if [[ "$key" == "y" || "$key" == "Y" ]] && [ -f $TWRPImg ]; then
     echo "";
     adb root;
-    timeout 5 adb wait-for-device;
+    timeout 5 adb 'wait-for-device';
     adb push $TWRPImg /tmp/twrp.img;
+    FOTAPartitionPath='/dev/block/platform/msm_sdcc.1/by-name/FOTAKernel';
+    if [ ! -z "$FlashableZipNewType" ]; then
+      FOTAPartitionPath='/dev/block/bootdevice/by-name/FOTAKernel';
+    fi;
     if [ ! -z "$(adb shell 'ls /system/bin/dd 2> /dev/null')" ]; then
-      adb shell /system/bin/dd if=/tmp/twrp.img of=/dev/block/platform/msm_sdcc.1/by-name/FOTAKernel;
+      adb shell /system/bin/dd if=/tmp/twrp.img of=$FOTAPartitionPath;
     else
-      adb shell /sbin/dd if=/tmp/twrp.img of=/dev/block/platform/msm_sdcc.1/by-name/FOTAKernel;
+      adb shell /sbin/dd if=/tmp/twrp.img of=$FOTAPartitionPath;
     fi;
     adb reboot recovery;
   else
@@ -119,11 +291,17 @@ repotwrp()
   echo "  [ Publish to BasketBuilt '$UploadFolder' ]";
   echo "";
   printf "  Upload (Y/n) ? ";
-  read -t 30 key;
+  if [[ "$BuildParams" =~ "local" ]]; then
+    key='n';
+  else
+    read -t 30 key;
+  fi;
   echo "";
   if [[ ! "$key" == "n" && ! "$key" == "N" ]]; then
     fileupl "$TargetDir/$OutBootImg" "$UploadFolder";
-    fileupl "$TargetDir/$OutMultiROMZip" "$UploadFolder";
+    if [ ! -z "$MultiROMBootableTWRP" ]; then
+      fileupl "$TargetDir/$OutMultiROMZip" "$UploadFolder";
+    fi;
     fileupl "$TargetDir/$OutFOTAZip" "$UploadFolder";
   fi;
 
@@ -134,11 +312,20 @@ repotwrp()
 # === Repo MultiROM ===
 repomrom()
 {
+  # Usage
+  if [ -z "$1" ]; then
+    echo "";
+    echo " Usage: repotwrp {device} [nosync,nowipe,outcl,fota,local]";
+    echo "";
+    return;
+  fi;
+
   export CurDir=${PWD};
+  repor;
+
+  # Phone and params
   PhoneParams="$1";
   BuildParams="$2";
-
-  # Phone huashan
   PhoneName="huashan";
 
   # Device selection
@@ -146,10 +333,23 @@ repomrom()
     PhoneName="$PhoneParams";
   fi;
 
+  # Handle boot types
+  FlashableZipNewType='';
+  MultiROMBootableTWRP='true';
+  case "$PhoneName" in
+    dora)
+        FlashableZipNewType='true';
+        MultiROMBootableTWRP='';;
+  esac;
+
   # Sources Sync
   if [[ ! "$BuildParams" =~ "nosync" ]]; then
     # Sources Sync
     repo sync --current-branch --detach --force-broken --force-sync --no-clone-bundle --no-tags;
+
+    # Java JDK 8
+    source ./build/envsetup.sh;
+    repopick 18851;
 
     # MutiROM submodules
     cd ./system/extras/multirom/;
@@ -161,6 +361,11 @@ repomrom()
   # Clean
   if [[ ! "$BuildParams" =~ "nowipe" ]]; then
     make clean;
+
+  # Cleanout
+  elif [[ "$BuildParams" =~ "outcl" ]]; then
+    rm -rfv ./out/target/product/$PhoneName/recovery/*;
+    rm -rfv ./out/target/product/$PhoneName/root/*;
   fi;
 
   # Kernels building
@@ -282,24 +487,29 @@ repomrom()
     cp "$BuildDir/$BuiltRecovery" "$TargetDir/twrp.img";
     if [ -f "$TargetDir/$PublishRecoveryFOTA" ]; then rm -f "$TargetDir/$PublishRecoveryFOTA"; fi;
     if [ -f "$TargetDir/$PublishRecoveryMultiROM" ]; then rm -f "$TargetDir/$PublishRecoveryMultiROM"; fi;
-    cp "$bash_android_twrp_fota_zip" "$TargetDir/$PublishRecoveryFOTA.unsigned.zip";
-    cp "$bash_android_twrp_multirom_zip" "$TargetDir/$PublishRecoveryMultiROM.unsigned.zip";
+    if [ ! -z "$FlashableZipNewType" ]; then
+      cp "$bash_android_twrp_fota_new_zip" "$TargetDir/$PublishRecoveryFOTA.unsigned.zip";
+      cp "$bash_android_twrp_multirom_new_zip" "$TargetDir/$PublishRecoveryMultiROM.unsigned.zip";
+    else
+      cp "$bash_android_twrp_fota_old_zip" "$TargetDir/$PublishRecoveryFOTA.unsigned.zip";
+      cp "$bash_android_twrp_multirom_old_zip" "$TargetDir/$PublishRecoveryMultiROM.unsigned.zip";
+    fi;
+    zip -j -g "$TargetDir/$PublishRecoveryFOTA.unsigned.zip" "$TargetDir/twrp.img";
     cd ./out/target/product/$PhoneName/;
     zip -g "$TargetDir/$PublishRecoveryMultiROM.unsigned.zip" -r "system/build.prop";
     cd ../../../../;
-    zip -j -g "$TargetDir/$PublishRecoveryFOTA.unsigned.zip" "$TargetDir/twrp.img";
     zip -j -g "$TargetDir/$PublishRecoveryMultiROM.unsigned.zip" "$TargetDir/twrp.img";
     java -jar "$bash_android_sign_apk_dir/signapk-cm121.jar" \
         -w "$bash_android_sign_apk_dir/testkey.x509.pem" \
         "$bash_android_sign_apk_dir/testkey.pk8" \
         "$TargetDir/$PublishRecoveryFOTA.unsigned.zip" \
         "$TargetDir/$PublishRecoveryFOTA";
+    rm -f "$TargetDir/$PublishRecoveryFOTA.unsigned.zip";
     java -jar "$bash_android_sign_apk_dir/signapk-cm121.jar" \
         -w "$bash_android_sign_apk_dir/testkey.x509.pem" \
         "$bash_android_sign_apk_dir/testkey.pk8" \
         "$TargetDir/$PublishRecoveryMultiROM.unsigned.zip" \
         "$TargetDir/$PublishRecoveryMultiROM";
-    rm -f "$TargetDir/$PublishRecoveryFOTA.unsigned.zip";
     rm -f "$TargetDir/$PublishRecoveryMultiROM.unsigned.zip";
     rm -f "$TargetDir/twrp.img";
     cp "$BuildDir/$BuiltRecovery" "$TargetDir/$ReleaseRecovery";
@@ -320,16 +530,24 @@ repomrom()
   echo "  [ Install Recovery on the '$PhoneName' ]";
   echo "";
   printf "  Flash Recovery to FOTA (y/N) ? ";
-  read -t 10 key;
+  if [[ "$BuildParams" =~ "fota" ]]; then
+    key='y';
+  else
+    read -t 10 key;
+  fi;
   if [[ "$key" == "y" || "$key" == "Y" ]] && [ -f $TWRPImg ]; then
     echo "";
     adb root;
-    timeout 5 adb wait-for-device;
+    timeout 5 adb 'wait-for-device';
     adb push "$BuildDir/recovery.img" /tmp/twrp.img;
+    FOTAPartitionPath='/dev/block/platform/msm_sdcc.1/by-name/FOTAKernel';
+    if [ ! -z "$FlashableZipNewType" ]; then
+      FOTAPartitionPath='/dev/block/bootdevice/by-name/FOTAKernel';
+    fi;
     if [ ! -z "$(adb shell 'ls /system/bin/dd 2> /dev/null')" ]; then
-      adb shell /system/bin/dd if=/tmp/twrp.img of=/dev/block/platform/msm_sdcc.1/by-name/FOTAKernel;
+      adb shell /system/bin/dd if=/tmp/twrp.img of=$FOTAPartitionPath;
     else
-      adb shell /sbin/dd if=/tmp/twrp.img of=/dev/block/platform/msm_sdcc.1/by-name/FOTAKernel;
+      adb shell /sbin/dd if=/tmp/twrp.img of=$FOTAPartitionPath;
     fi;
     adb reboot recovery;
   else
@@ -343,11 +561,17 @@ repomrom()
   echo "  [ Publish to BasketBuilt '$UploadFolder' ]";
   echo "";
   printf "  Upload (Y/n) ? ";
-  read -t 30 key;
+  if [[ "$BuildParams" =~ "local" ]]; then
+    key='n';
+  else
+    read -t 30 key;
+  fi;
   echo "";
   if [[ ! "$key" == "n" && ! "$key" == "N" ]]; then
     fileupl "$TargetDir/$PublishInstaller" "$UploadFolder";
-    fileupl "$TargetDir/$PublishRecoveryMultiROM" "$UploadFolder";
+    if [ ! -z "$MultiROMBootableTWRP" ]; then
+      fileupl "$TargetDir/$PublishRecoveryMultiROM" "$UploadFolder";
+    fi;
     fileupl "$TargetDir/$PublishRecoveryFOTA" "$UploadFolder";
   fi;
 
@@ -372,7 +596,7 @@ function mktwrp()
   echo "";
   mka recoveryimage;
 
-  if [ -f ]; then
+  if [ -f "$FilePath" ]; then
     cp "$FilePath" "$TmpDir/$FileTarget";
     FilesList="$FilesList ./$FileTarget";
   fi;
@@ -393,5 +617,45 @@ function mktwrp()
 
   rm -rf "$TmpDir";
   cd "$CurDir";
+}
+
+# === Kernel Injector Zip ===
+function kernelinjectorzip()
+{
+  # Usage
+  if [ -z "${2}" ] || [ ! -f "${2}" ]; then
+    echo '';
+    echo ' usage: kernelinjectorzip device kernel_file_path';
+    echo '';
+    return;
+  fi;
+
+  # Variables
+  local CurDir=$(pwd);
+  local PhoneName="${1}";
+  local KernelFile=$(readlink -f "${2}");
+  local OutFile="kernel-injector-"$(date +'%Y%m%d')"-${PhoneName}.zip";
+  local TargetFile="$(xdg-user-dir DESKTOP)/${OutFile}";
+  local TmpDir=$(mktemp -d);
+
+  # Package
+  cd "${TmpDir}/";
+  mkdir ./scripts;
+  cp "${KernelFile}" './scripts/kernel';
+  cp "${bash_kernel_injector_template_zip}" "${TargetFile}.unsigned.zip";
+  zip -g "${TargetFile}.unsigned.zip" './scripts/kernel';
+  java -jar "${bash_android_sign_apk_dir}/signapk-cm121.jar" \
+       -w "${bash_android_sign_apk_dir}/testkey.x509.pem" \
+       "${bash_android_sign_apk_dir}/testkey.pk8" \
+       "${TargetFile}.unsigned.zip" \
+       "${TargetFile}";
+  rm -f "${TargetFile}.unsigned.zip";
+  rm -rf "${TmpDir}";
+  cd "${CurDir}";
+
+  # Result
+  echo '';
+  echo -e " \e[1;37mPackage File:\e[0m ${TargetFile}";
+  echo '';
 }
 

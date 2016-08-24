@@ -3,6 +3,12 @@
 #   Developed by Adrian DC - 2015-2016
 # ======================================
 
+# === Clear Screen ===
+alias cls='echo -e \\033c; clear';
+
+# === Clipboard ===
+function toclip() { xclip -selection c; }
+
 # === Folders Syncer ===
 function rsynca()
 {
@@ -160,4 +166,24 @@ function netspeed()
     fi;
     sleep 1;
   done;
+}
+
+# === Build Locker ===
+function buildlock()
+{
+  # Variables
+  local file_lock=~/.tmp_runlock.tag;
+
+  # Lock Detected
+  if [ -f "${file_lock}" ]; then
+    echo '';
+    echo " buildlock: The file '${file_lock}' still exists, waiting...";
+    echo '';
+    while [ -f "${file_lock}" ]; do sleep 10; done;
+  fi;
+
+  # Run work
+  echo 1 > "${file_lock}";
+  ${@};
+  rm -f "${file_lock}";
 }

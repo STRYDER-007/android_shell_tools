@@ -1,0 +1,47 @@
+#!/bin/bash
+# ======================================
+#   Developed by Adrian DC - 2015-2016
+# ======================================
+
+# === CM 14 Patcher ===
+function cm14patcher()
+{
+  # ==========================================================
+  # Repo root
+  if [ -z "$(type -t croot)" ]; then
+    while [ ! -e './build/envsetup.sh' ]; do cd ../; done;
+    source ./build/envsetup.sh;
+  fi;
+  croot;
+
+  # ==========================================================
+  # CM api checks
+  export I_WANT_A_QUAIL_STAR=true;
+
+  # ==========================================================
+  # linker: Make text relocations denial optional
+  repopick 158551 158716;
+
+  # ==========================================================
+  # cm: Minor config reorganization
+  repopick 160910;
+
+  # ==========================================================
+  # RIL: Make RIL subclassable
+  repopick 158953 158954 159520;
+
+  # ==========================================================
+  # Settings: AppOps...
+  repopick 162832-162835;
+
+  # ==========================================================
+  # media: Allow to use old metadata buffer type
+  cd frameworks/av;
+  git fetch http://github.com/AdrianDC/android_development_backup fw_av;
+  git cherry-pick FETCH_HEAD;
+  croot;
+
+  # ==========================================================
+  # repo root
+  croot;
+}
